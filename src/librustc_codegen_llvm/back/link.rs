@@ -462,6 +462,27 @@ fn print_native_static_libs(sess: &Session, all_native_libs: &[NativeLibrary]) {
     }
 }
 
+fn get_file_path(sess: &Session, name: &str) -> PathBuf {
+    let fs = sess.target_filesearch(PathKind::Native);
+    let search_path = |path: &PathBuf| -> Option<PathBuf> {
+        let file_path = path.join(name);
+        if file_path.as_path().exists() {
+            Some(file_path)
+        } else {
+            None
+        }
+    };
+    let mut found_path = search_path(&fs.get_lib_path());
+    if found_path.is_none() {
+        fs.for_each_lib_search_path(|path, _| {
+            if found_path.is_none() {
+                found_path = search_path(&path.to_path_buf());
+            }
+        });
+    }
+    found_path.unwrap_or_else(|| PathBuf::from(name))
+}
+
 // Create a dynamic library or executable
 //
 // This will invoke the system linker/cc to create the resulting file. This
@@ -477,7 +498,6 @@ fn link_natively(sess: &Session,
     // The invocations of cc share some flags across platforms
     let (pname, mut cmd) = get_linker(sess, &linker, flavor);
 
-    let root = sess.target_filesearch(PathKind::Native).get_lib_path();
     if let Some(args) = sess.target.target.options.pre_link_args.get(&flavor) {
         cmd.args(args);
     }
@@ -505,12 +525,12 @@ fn link_natively(sess: &Session,
         &sess.target.target.options.pre_link_objects_dll
     };
     for obj in pre_link_objects {
-        cmd.arg(root.join(obj));
+        cmd.arg(get_file_path(sess, obj));
     }
 
     if crate_type == config::CrateType::Executable && sess.crt_static() {
         for obj in &sess.target.target.options.pre_link_objects_exe_crt {
-            cmd.arg(root.join(obj));
+            cmd.arg(get_file_path(sess, obj));
         }
     }
 
@@ -534,11 +554,11 @@ fn link_natively(sess: &Session,
         cmd.args(args);
     }
     for obj in &sess.target.target.options.post_link_objects {
-        cmd.arg(root.join(obj));
+        cmd.arg(get_file_path(sess, obj));
     }
     if sess.crt_static() {
         for obj in &sess.target.target.options.post_link_objects_crt {
-            cmd.arg(root.join(obj));
+            cmd.arg(get_file_path(sess, obj));
         }
     }
     if let Some(args) = sess.target.target.options.post_link_args.get(&flavor) {
